@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Unconscious Interface</title>
+    <style>
+        :root {
+            --bg-color: #08080a;
+            --text-color: #e0e0e0;
+            --tile-bg: #141418;
+            --tile-border: #333;
+            --tile-active: #2c2c35;
+            --accent: #6f7fd6;
+        }
+
+        * {
+            box-sizing: border-box;
+            touch-action: manipulation; /* Removes tap delay on phones */
+            user-select: none;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Courier New', Courier, monospace;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* --- HEADER & MODES --- */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            background: #000;
+            border-bottom: 1px solid #222;
+        }
+
+        .mode-toggle {
+            display: flex;
+            gap: 10px;
+        }
+
+        button.mode-btn {
+            background: transparent;
+            border: 1px solid #444;
+            color: #666;
+            padding: 6px 12px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            border-radius: 4px;
+            text-transform: uppercase;
+            font-weight: bold;
+            transition: all 0.2s;
+        }
+
+        button.mode-btn.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(111, 127, 214, 0.1);
+        }
+
+        .depth-meter {
+            font-size: 0.75rem;
+            color: #444;
+            letter-spacing: 2px;
+        }
+
+        /* --- SENTENCE DISPLAY --- */
+        #display-area {
+            flex: 0 0 20vh;
+            padding: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            align-content: center;
+            justify-content: center;
+            gap: 6px;
+            overflow-y: auto;
+            border-bottom: 1px solid #222;
+            background: radial-gradient(circle at center, #101014 0%, #08080a 100%);
+        }
+
+        .word-chip {
+            font-size: 1.1rem;
+            animation: fadeIn 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .placeholder {
+            color: #333;
+            font-style: italic;
+            font-size: 0.9rem;
+        }
+
+        /* --- THE GRID (6 TILES) --- */
+        #grid-container {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 1fr 1fr; /* 2 Columns */
+            grid-template-rows: 1fr 1fr 1fr; /* 3 Rows */
+            gap: 12px;
+            padding: 15px;
+            position: relative;
+        }
+
+        .tile {
+            background-color: var(--tile-bg);
+            border: 1px solid var(--tile-border);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: #444; /* Dark text for symbols */
+            cursor: pointer;
+            transition: transform 0.1s, background-color 0.2s;
+            -webkit-tap-highlight-color: transparent;
+            position: relative;
+        }
+
+        .tile:active {
+            transform: scale(0.96);
+            background-color: var(--tile-active);
+            border-color: #666;
+        }
+
+        /* Visual Feedback for Depth */
+        /* Depth 0: Standard */
+        .depth-0 .tile { border-left: 2px solid #333; }
+        /* Depth 1: You are inside a Group */
+        .depth-1 .tile { border-left: 2px solid #555; background-color: #1a1a20; }
+        /* Depth 2: You are choosing the Word */
+        .depth-2 .tile { border-left: 2px solid #777; background-color: #202026; }
+
+        /* --- CONTROLS --- */
+        #controls {
+            padding: 15px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            background: #000;
+            border-top: 1px solid #222;
+        }
+
+        button.ctrl-btn {
+            background: #1a1a20;
+            border: 1px solid #333;
+            color: #888;
+            padding: 12px 24px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            width: 100px;
+        }
+        
+        button.ctrl-btn:active {
+            background: #333;
+            color: #fff;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="mode-toggle">
+            <button class="mode-btn active" id="btn-order" onclick="setMode('structured')">Structure</button>
+            <button class="mode-btn" id="btn-chaos" onclick="setMode('random')">Chaos</button>
+        </div>
+        <div class="depth-meter" id="depth-display">LEVEL I</div>
+    </header>
+
+    <div id="display-area">
+        <span class="placeholder" id="placeholder">Tap to speak...</span>
+    </div>
+
+    <div id="grid-container" class="depth-0">
+        </div>
+
+    <div id="controls">
+        <button class="ctrl-btn" onclick="backspace()">Undo</button>
+        <button class="ctrl-btn" onclick="clearAll()">Clear</button>
+    </div>
+
+    <script>
+        /* 
+           VOCABULARY MATRIX (6 Groups x 6 Subgroups x 6 Words = 216 words)
+           
+           STRUCTURED MAP:
+           1. Identity (Who)
+           2. Action (Movement/Creation)
+           3. State (Internal Feeling)
+           4. Nature (Symbols/Objects)
+           5. Quality (Adjectives)
+           6. Logic (Time/Connectors)
+        */
+        
+        // Data is stored as 36 arrays. Each array contains 6 words.
+        const baseVocab = [
+            // --- GROUP 1: IDENTITY (Indices 0-5) ---
+            ["I", "You", "We", "They", "He", "She"],          // Pronouns
+            ["Self", "Shadow", "Soul", "Body", "Mind", "Heart"], // Parts of Self
+            ["Mother", "Father", "Child", "Ancestor", "Stranger", "Friend"], // Relations
+            ["God", "Demon", "Spirit", "Ghost", "Beast", "Angel"], // Archetypes
+            ["King", "Queen", "Master", "Slave", "Hero", "Fool"], // Roles
+            ["Nobody", "Everyone", "Someone", "Enemy", "Lover", "Guide"], // Others
+
+            // --- GROUP 2: ACTION (Indices 6-11) ---
+            ["Go", "Stop", "Run", "Walk", "Fly", "Fall"],       // Movement
+            ["Make", "Break", "Create", "Destroy", "Fix", "Burn"], // Creation
+            ["Give", "Take", "Steal", "Offer", "Keep", "Lose"],   // Transaction
+            ["Speak", "Scream", "Whisper", "Call", "Silence", "Listen"], // Voice
+            ["Kill", "Save", "Hunt", "Hide", "Fight", "Surrender"], // Conflict
+            ["Open", "Close", "Push", "Pull", "Enter", "Leave"],  // Interaction
+
+            // --- GROUP 3: INNER STATE (Indices 12-17) ---
+            ["Am", "Is", "Are", "Was", "Will Be", "Become"],      // Existence
+            ["Feel", "Touch", "Sense", "Numb", "Pain", "Pleasure"], // Sensation
+            ["Love", "Hate", "Fear", "Trust", "Hope", "Doubt"],   // Emotion
+            ["Think", "Know", "Forget", "Remember", "Dream", "Wake"], // Cognition
+            ["Want", "Need", "Wish", "Desire", "Reject", "Accept"], // Volition
+            ["Live", "Die", "Grow", "Rot", "Heal", "Bleed"],      // Life Cycle
+
+            // --- GROUP 4: NATURE & SYMBOLS (Indices 18-23) ---
+            ["Sun", "Moon", "Star", "Sky", "Void", "Light"],      // Cosmos
+            ["Fire", "Water", "Earth", "Air", "Wind", "Stone"],   // Elements
+            ["Tree", "Root", "Flower", "Forest", "Seed", "Thorn"], // Flora
+            ["Door", "Wall", "Window", "Key", "Path", "Bridge"],  // Structures
+            ["Eye", "Hand", "Mouth", "Blood", "Bone", "Breath"],  // Organic
+            ["Sword", "Cup", "Wand", "Coin", "Mirror", "Mask"],   // Objects
+
+            // --- GROUP 5: QUALITIES (Indices 24-29) ---
+            ["Good", "Bad", "Right", "Wrong", "True", "False"],   // Moral
+            ["Big", "Small", "Empty", "Full", "Whole", "Broken"], // State
+            ["High", "Low", "Deep", "Shallow", "Far", "Near"],    // Space
+            ["Hot", "Cold", "Dark", "Bright", "Clear", "Foggy"],  // Atmosphere
+            ["Old", "New", "Ancient", "Young", "Dead", "Alive"],  // Time-state
+            ["Hard", "Soft", "Heavy", "Light", "Sharp", "Dull"],  // Texture
+
+            // --- GROUP 6: LOGIC & TIME (Indices 30-35) ---
+            ["Now", "Then", "Never", "Always", "Soon", "Later"],  // Time
+            ["Here", "There", "Where", "Everywhere", "Nowhere", "Beyond"], // Place
+            ["And", "Or", "But", "If", "Because", "So"],         // Logic
+            ["With", "Without", "For", "Against", "From", "To"],  // Prepositions
+            ["In", "Out", "Through", "Over", "Under", "Between"], // Direction
+            ["Yes", "No", "Maybe", "Why", "How", "What"]          // Query
+        ];
+
+        // --- APP STATE ---
+        let mode = 'structured'; 
+        let navPath = []; // Tracks clicks: [groupIndex, subGroupIndex]
+        let sentence = [];
+        let chaosStructure = []; // Used when mode is random
+
+        // --- DOM REFERENCES ---
+        const grid = document.getElementById('grid-container');
+        const display = document.getElementById('display-area');
+        const placeholder = document.getElementById('placeholder');
+        const depthLabel = document.getElementById('depth-display');
+
+        const symbols = ["I", "II", "III", "IV", "V", "VI"]; 
+
+        function init() {
+            renderGrid();
+        }
+
+        // --- MODE SWITCHING ---
+        function setMode(newMode) {
+            mode = newMode;
+            navPath = []; // Reset navigation depth
+            
+            document.getElementById('btn-order').classList.toggle('active', mode === 'structured');
+            document.getElementById('btn-chaos').classList.toggle('active', mode === 'random');
+
+            if (mode === 'random') {
+                shuffleDeck();
+            }
+            renderGrid();
+        }
+
+        function shuffleDeck() {
+            // 1. Flatten the entire dictionary
+            let allWords = baseVocab.flat();
+            
+            // 2. Fisher-Yates Shuffle
+            for (let i = allWords.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [allWords[i], allWords[j]] = [allWords[j], allWords[i]];
+            }
+
+            // 3. Rebuild into structure (Array of 36 arrays of 6)
+            chaosStructure = [];
+            while (allWords.length > 0) {
+                chaosStructure.push(allWords.splice(0, 6));
+            }
+        }
+
+        // --- INTERACTION ---
+        function handleTap(index) {
+            // Push the selection index (0-5)
+            navPath.push(index);
+
+            // Check if we reached Depth 3 (Word Selection)
+            if (navPath.length === 3) {
+                const [g, s, w] = navPath;
+                resolveWord(g, s, w);
+                navPath = []; // Reset to top level
+            }
+            
+            renderGrid();
+        }
+
+        function resolveWord(gIndex, sIndex, wIndex) {
+            let word = "";
+            // Logic: The data is 36 arrays.
+            // Group 0 contains arrays 0-5. Group 1 contains arrays 6-11.
+            // Target Array = (GroupIndex * 6) + SubGroupIndex
+            const arrayIndex = (gIndex * 6) + sIndex;
+            
+            if (mode === 'structured') {
+                word = baseVocab[arrayIndex][wIndex];
+            } else {
+                word = chaosStructure[arrayIndex][wIndex];
+            }
+            addWord(word);
+        }
+
+        function addWord(word) {
+            sentence.push(word);
+            updateDisplay();
+        }
+
+        // --- UNDO / CLEAR ---
+        function backspace() {
+            // Smart Backspace:
+            // If you are deep in the menu (Depth 1 or 2), it goes back up.
+            // If you are at the top (Depth 0), it deletes the last word written.
+            if (navPath.length > 0) {
+                navPath.pop();
+                renderGrid();
+            } else {
+                sentence.pop();
+                updateDisplay();
+            }
+        }
+
+        function clearAll() {
+            sentence = [];
+            navPath = [];
+            updateDisplay();
+            renderGrid();
+        }
+
+        // --- RENDERING ---
+        function updateDisplay() {
+            display.innerHTML = '';
+            if (sentence.length === 0) {
+                display.appendChild(placeholder);
+            } else {
+                sentence.forEach(w => {
+                    const span = document.createElement('span');
+                    span.className = 'word-chip';
+                    span.textContent = w;
+                    // Allow clicking a word to delete it specificially?
+                    // Let's keep it simple for now, standard text flow.
+                    display.appendChild(span);
+                });
+            }
+            // Auto-scroll to bottom
+            display.scrollTop = display.scrollHeight;
+        }
+
+        function renderGrid() {
+            grid.innerHTML = '';
+            
+            // Update CSS State for visuals
+            grid.className = `depth-${navPath.length}`;
+            
+            // Update Text Label
+            const levels = ["REALM", "REGION", "FOCUS"];
+            depthLabel.textContent = levels[navPath.length] || "SELECT";
+
+            // Generate 6 Tiles
+            for (let i = 0; i < 6; i++) {
+                const tile = document.createElement('div');
+                tile.className = 'tile';
+                
+                // We use Roman Numerals to anchor the eye without revealing the word.
+                tile.textContent = symbols[i];
+                
+                tile.onclick = () => handleTap(i);
+                grid.appendChild(tile);
+            }
+        }
+
+        // Start
+        init();
+
+    </script>
+</body>
+</html>
